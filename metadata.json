@@ -1,0 +1,5 @@
+{
+  "name": "تطبيق أذكار المسلم",
+  "description": "تطبيق إسلامي شامل يجمع الأذكار، الأدعية، القرآن الكريم، ومواقيت الصلاة بتصميم عصري وأنيق.",
+  "requestFramePermissions": ["geolocation", "notifications"]
+}
