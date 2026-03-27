@@ -39,14 +39,14 @@ body {
 
 .quran-text-exact {
   font-family: var(--font-quran);
-  line-height: 1.9;
+  line-height: 2.4;
   direction: rtl;
   text-align: justify;
   text-justify: inter-word;
   color: #000000;
-  font-weight: 600;
-  padding: 0 5px;
-  word-spacing: 0.1em;
+  font-weight: 500;
+  padding: 0 10px;
+  word-spacing: 0.15em;
   word-break: keep-all;
 }
 
@@ -93,21 +93,22 @@ body {
 }
 
 .ayah-end {
-  font-family: serif;
-  font-size: 0.75em;
-  color: #000000;
-  margin: 0 6px;
-  vertical-align: middle;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 1.8em;
-  height: 1.8em;
+  width: 32px;
+  height: 32px;
+  margin: 0 8px;
   border: 1.5px solid #000000;
   border-radius: 50%;
-  font-weight: bold;
+  font-family: var(--font-sans);
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: #000000;
+  vertical-align: middle;
   position: relative;
   top: -2px;
+  background: transparent;
 }
 
 .surah-header-mushaf {
@@ -188,4 +189,19 @@ body {
 
 .markdown-body ul {
   @apply list-disc list-inside mb-4;
+}
+
+.translation-text {
+  font-family: var(--font-sans);
+  font-size: 0.9rem;
+  color: #6b7280;
+  line-height: 1.6;
+  margin-top: 8px;
+  margin-bottom: 16px;
+  text-align: left;
+  direction: ltr;
+}
+
+.dark .translation-text {
+  color: #9ca3af;
 }

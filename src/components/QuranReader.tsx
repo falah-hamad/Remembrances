@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Book, Search, ChevronRight, ChevronLeft, ChevronDown, Settings, List, Info, X } from 'lucide-react';
+import { Book, Search, ChevronRight, ChevronLeft, ChevronDown, Settings, List, Info, X, Play, Pause, Volume2 } from 'lucide-react';
 import { cn } from '../lib/utils';
 
 interface Surah {
@@ -43,16 +43,41 @@ export default function QuranReader() {
   const [loading, setLoading] = useState(false);
   const [imageError, setImageError] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
-  const [fontSize, setFontSize] = useState(26);
+  const [fontSize, setFontSize] = useState(() => parseInt(localStorage.getItem('quran_fontSize') || '26'));
   const [showSettings, setShowSettings] = useState(false);
-  const [viewType, setViewType] = useState<'mushaf' | 'text'>('text');
+  const [viewType, setViewType] = useState<'mushaf' | 'text'>(() => (localStorage.getItem('quran_viewType') as any) || 'text');
+  const [showTranslation, setShowTranslation] = useState(() => localStorage.getItem('quran_showTranslation') === 'true');
+  const [translations, setTranslations] = useState<{[key: number]: string}>({});
+  const [playingAyah, setPlayingAyah] = useState<number | null>(null);
+  const [audio, setAudio] = useState<HTMLAudioElement | null>(null);
   const [jumpPage, setJumpPage] = useState('');
   const [selectedAyahForTafsir, setSelectedAyahForTafsir] = useState<Ayah | null>(null);
   const [tafsir, setTafsir] = useState<Tafsir | null>(null);
   const [tafsirLoading, setTafsirLoading] = useState(false);
   const [viewMode, setViewMode] = useState<'surah' | 'juz' | 'page'>('surah');
-  const [navDirection, setNavDirection] = useState<'horizontal' | 'vertical'>('horizontal');
+  const [navDirection, setNavDirection] = useState<'horizontal' | 'vertical'>(() => (localStorage.getItem('quran_navDirection') as any) || 'horizontal');
+  const [theme, setTheme] = useState<'light' | 'sepia' | 'dark'>(() => (localStorage.getItem('quran_theme') as any) || 'light');
   const [showUI, setShowUI] = useState(true);
+  
+  useEffect(() => {
+    localStorage.setItem('quran_viewType', viewType);
+  }, [viewType]);
+
+  useEffect(() => {
+    localStorage.setItem('quran_showTranslation', showTranslation.toString());
+  }, [showTranslation]);
+
+  useEffect(() => {
+    localStorage.setItem('quran_navDirection', navDirection);
+  }, [navDirection]);
+
+  useEffect(() => {
+    localStorage.setItem('quran_theme', theme);
+  }, [theme]);
+
+  useEffect(() => {
+    localStorage.setItem('quran_fontSize', fontSize.toString());
+  }, [fontSize]);
   
   useEffect(() => {
     if (!showUI) {
@@ -82,17 +107,39 @@ export default function QuranReader() {
     }
   };
 
+  useEffect(() => {
+    // Scroll to top when page changes
+    const container = document.querySelector('.custom-scrollbar');
+    if (container) {
+      container.scrollTop = 0;
+    }
+  }, [currentPage, selectedSurah]);
+
   const fetchSurahContent = async (number: number) => {
     setLoading(true);
     setImageError(false);
     setSelectedSurah(number);
     setCurrentPage(null);
+    setTranslations({});
     try {
-      const res = await fetch(`https://api.alquran.cloud/v1/surah/${number}/quran-uthmani`);
+      const [res, transRes] = await Promise.all([
+        fetch(`https://api.alquran.cloud/v1/surah/${number}/quran-uthmani`),
+        showTranslation ? fetch(`https://api.alquran.cloud/v1/surah/${number}/en.sahih`) : Promise.resolve(null)
+      ]);
+      
       const data = await res.json();
       const surahAyahs = data.data.ayahs;
       setAllAyahs(surahAyahs);
-      // Set to the first page of this surah
+
+      if (transRes) {
+        const transData = await transRes.json();
+        const transMap: {[key: number]: string} = {};
+        transData.data.ayahs.forEach((a: any) => {
+          transMap[a.numberInSurah] = a.text;
+        });
+        setTranslations(transMap);
+      }
+
       if (surahAyahs.length > 0) {
         setCurrentPage(surahAyahs[0].page);
       }
@@ -109,10 +156,24 @@ export default function QuranReader() {
     setCurrentPage(page);
     setSelectedSurah(null);
     setAllAyahs([]);
+    setTranslations({});
     try {
-      const res = await fetch(`https://api.alquran.cloud/v1/page/${page}/quran-uthmani`);
+      const [res, transRes] = await Promise.all([
+        fetch(`https://api.alquran.cloud/v1/page/${page}/quran-uthmani`),
+        showTranslation ? fetch(`https://api.alquran.cloud/v1/page/${page}/en.sahih`) : Promise.resolve(null)
+      ]);
+      
       const data = await res.json();
       setAllAyahs(data.data.ayahs);
+
+      if (transRes) {
+        const transData = await transRes.json();
+        const transMap: {[key: number]: string} = {};
+        transData.data.ayahs.forEach((a: any) => {
+          transMap[a.numberInSurah] = a.text;
+        });
+        setTranslations(transMap);
+      }
     } catch (err) {
       console.error('Error fetching page content:', err);
     } finally {
@@ -132,6 +193,56 @@ export default function QuranReader() {
     } finally {
       setTafsirLoading(false);
     }
+  };
+
+  const playAyahAudio = async (ayah: Ayah) => {
+    if (playingAyah === ayah.number) {
+      audio?.pause();
+      setPlayingAyah(null);
+      return;
+    }
+
+    if (audio) {
+      audio.pause();
+    }
+
+    const newAudio = new Audio(`https://cdn.islamic.network/quran/audio/128/ar.alafasy/${ayah.number}.mp3`);
+    setAudio(newAudio);
+    setPlayingAyah(ayah.number);
+    
+    newAudio.play();
+    newAudio.onended = () => {
+      setPlayingAyah(null);
+    };
+  };
+
+  const playPageAudio = async (ayahs: Ayah[]) => {
+    if (playingAyah) {
+      audio?.pause();
+      setPlayingAyah(null);
+      return;
+    }
+
+    let currentIndex = 0;
+    const playNext = () => {
+      if (currentIndex >= ayahs.length) {
+        setPlayingAyah(null);
+        return;
+      }
+
+      const ayah = ayahs[currentIndex];
+      const newAudio = new Audio(`https://cdn.islamic.network/quran/audio/128/ar.alafasy/${ayah.number}.mp3`);
+      setAudio(newAudio);
+      setPlayingAyah(ayah.number);
+      
+      newAudio.play();
+      newAudio.onended = () => {
+        currentIndex++;
+        playNext();
+      };
+    };
+
+    playNext();
   };
 
   const fetchJuzContent = async (juz: number) => {
@@ -211,7 +322,8 @@ export default function QuranReader() {
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
         className={cn(
-          "mx-auto flex flex-col h-[100dvh] overflow-hidden bg-white transition-all duration-500",
+          "mx-auto flex flex-col h-[100dvh] overflow-hidden transition-all duration-500",
+          theme === 'light' ? "bg-white" : theme === 'sepia' ? "bg-[#f4ecd8]" : "bg-[#1a1a1a] text-gray-300",
           showUI ? "max-w-5xl relative" : "!fixed !inset-0 !z-[99999] !w-[100vw] !h-[100vh] !max-w-none !m-0 !p-0 !transform-none"
         )}
       >
@@ -262,6 +374,17 @@ export default function QuranReader() {
               </div>
 
               <div className="flex items-center gap-2 flex-1 justify-end">
+                <button 
+                  onClick={() => playPageAudio(displayedAyahs)}
+                  className={cn(
+                    "p-2 hover:bg-gray-100 rounded-lg transition-colors flex items-center gap-1",
+                    playingAyah ? "text-emerald-600" : "text-gray-600"
+                  )}
+                  title="تشغيل الصفحة"
+                >
+                  {playingAyah ? <Pause size={20} /> : <Volume2 size={20} />}
+                  <span className="text-xs font-bold">استماع</span>
+                </button>
                 {viewType === 'mushaf' && displayedAyahs.length > 0 && (
                   <button 
                     onClick={() => fetchTafsir(displayedAyahs[0])}
@@ -315,6 +438,45 @@ export default function QuranReader() {
                 </div>
               </div>
 
+              <div className="flex items-center justify-between">
+                <span className="font-bold text-[#5A5A40]">السمة</span>
+                <div className="flex bg-[#f5f5f0] p-1 rounded-xl">
+                  {[
+                    { id: 'light', label: 'فاتح', color: 'bg-white' },
+                    { id: 'sepia', label: 'قديم', color: 'bg-[#f4ecd8]' },
+                    { id: 'dark', label: 'داكن', color: 'bg-[#1a1a1a]' }
+                  ].map(t => (
+                    <button 
+                      key={t.id}
+                      onClick={() => setTheme(t.id as any)}
+                      className={cn(
+                        "px-4 py-2 rounded-lg text-sm font-bold transition-all flex items-center gap-2",
+                        theme === t.id ? "bg-[#5A5A40] text-white shadow-sm" : "text-[#8e8e8e]"
+                      )}
+                    >
+                      <div className={cn("w-3 h-3 rounded-full border border-gray-300", t.color)} />
+                      {t.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="flex items-center justify-between">
+                <span className="font-bold text-[#5A5A40]">الترجمة (الإنجليزية)</span>
+                <button 
+                  onClick={() => setShowTranslation(!showTranslation)}
+                  className={cn(
+                    "w-12 h-6 rounded-full transition-all relative",
+                    showTranslation ? "bg-[#5A5A40]" : "bg-gray-200"
+                  )}
+                >
+                  <motion.div 
+                    animate={{ x: showTranslation ? 24 : 4 }}
+                    className="absolute top-1 w-4 h-4 bg-white rounded-full shadow-sm"
+                  />
+                </button>
+              </div>
+
               {viewType === 'text' && (
                 <div className="flex items-center justify-between">
                   <span className="font-bold text-[#5A5A40]">حجم الخط</span>
@@ -355,7 +517,8 @@ export default function QuranReader() {
 
         <main 
           className={cn(
-            "flex-1 relative bg-[#f4f1ea] overflow-hidden transition-all duration-500",
+            "flex-1 relative overflow-hidden transition-all duration-500",
+            theme === 'light' ? "bg-[#f4f1ea]" : theme === 'sepia' ? "bg-[#f4ecd8]" : "bg-[#1a1a1a]",
             showUI ? "mt-16" : "mt-0"
           )}
         >
@@ -366,7 +529,10 @@ export default function QuranReader() {
               animate={{ x: 0, y: 0, opacity: 1 }}
               exit={{ x: navDirection === 'horizontal' ? -100 : 0, y: navDirection === 'vertical' ? -100 : 0, opacity: 0 }}
               transition={{ type: 'spring', damping: 25, stiffness: 200 }}
-              className="w-full h-full flex flex-col"
+              className={cn(
+                "w-full h-full flex flex-col",
+                theme === 'light' ? "bg-white" : theme === 'sepia' ? "bg-[#f4ecd8]" : "bg-[#1a1a1a]"
+              )}
               drag={navDirection === 'horizontal' ? 'x' : 'y'}
               dragConstraints={{ left: 0, right: 0, top: 0, bottom: 0 }}
               onTap={() => setShowUI(!showUI)}
@@ -389,9 +555,11 @@ export default function QuranReader() {
                   </div>
                 </div>
               ) : viewType === 'mushaf' && !imageError ? (
-                <div className={cn("mushaf-page-container !bg-[#fdfbf0]", !showUI && "!p-0 !m-0")}>
+                <div className={cn("mushaf-page-container", theme === 'light' ? "!bg-[#fdfbf0]" : theme === 'sepia' ? "!bg-[#f4ecd8]" : "!bg-[#1a1a1a]", !showUI && "!p-0 !m-0")}>
                   <div className={cn(
                     "mushaf-image-wrapper transition-all duration-500", 
+                    theme === 'sepia' && "sepia-[0.3]",
+                    theme === 'dark' && "invert brightness-90",
                     !showUI && "!w-full !h-full !max-w-[min(100vw,calc(100vh/1.5))] !mx-auto !border-none !shadow-none !rounded-none !aspect-auto !min-h-0"
                   )}>
                     <div className={cn("mushaf-decorative-frame", !showUI && "!inset-1 opacity-10")} />
@@ -429,10 +597,11 @@ export default function QuranReader() {
                   </div>
                 </div>
               ) : (
-                <div className={cn("mushaf-page-container !bg-white", !showUI && "!p-0 !m-0")}>
+                <div className={cn("mushaf-page-container", theme === 'light' ? "!bg-white" : theme === 'sepia' ? "!bg-[#f4ecd8]" : "!bg-[#1a1a1a]", !showUI && "!p-0 !m-0")}>
                   <div className={cn(
                     "transition-all duration-500 flex flex-col", 
-                    !showUI ? "!w-full !h-full !max-w-none !p-4 md:!p-8 bg-white" : "text-mushaf-wrapper"
+                    !showUI ? "!w-full !h-full !max-w-none !p-4 md:!p-8" : "text-mushaf-wrapper",
+                    theme === 'light' ? "bg-white" : theme === 'sepia' ? "bg-[#f4ecd8]" : "bg-[#1a1a1a]"
                   )}>
                     {showUI && <div className="mushaf-decorative-frame" />}
                     
@@ -444,7 +613,10 @@ export default function QuranReader() {
 
                     <div className="flex-1 flex flex-col overflow-hidden py-6">
                       <div 
-                        className="quran-text-exact h-full px-6 md:px-12" 
+                        className={cn(
+                          "quran-text-exact h-full px-6 md:px-12",
+                          theme === 'dark' && "text-white"
+                        )}
                         style={{ fontSize: `${fontSize}px` }}
                       >
                         {displayedAyahs.map((ayah, index) => {
@@ -455,22 +627,40 @@ export default function QuranReader() {
                           return (
                             <span key={ayah.number}>
                               {shouldShowSurahHeader && (
-                                <div className="surah-header-mushaf">
-                                  <h3>{ayah.surah?.name}</h3>
+                                <div className={cn(
+                                  "surah-header-mushaf",
+                                  theme === 'dark' && "bg-gray-800 border-gray-700 text-white"
+                                )}>
+                                  <h3 className={cn(theme === 'dark' && "text-white")}>{ayah.surah?.name}</h3>
                                   {ayah.surah?.number !== 9 && ayah.surah?.number !== 1 && (
-                                    <div className="bismillah-mushaf">بِسْمِ اللَّهِ الرَّحْمَٰنِ الرَّحِيمِ</div>
+                                    <div className={cn("bismillah-mushaf", theme === 'dark' && "text-white")}>بِسْمِ اللَّهِ الرَّحْمَٰنِ الرَّحِيمِ</div>
                                   )}
                                 </div>
                               )}
                               <span 
                                 onClick={(e) => { e.stopPropagation(); fetchTafsir(ayah); }}
-                                className="inline cursor-pointer hover:bg-[#5A5A40]/5 transition-colors rounded px-0.5"
+                                className={cn(
+                                  "inline cursor-pointer hover:bg-[#5A5A40]/5 transition-colors rounded px-0.5 relative group",
+                                  playingAyah === ayah.number && "bg-emerald-50 text-emerald-700",
+                                  theme === 'dark' && playingAyah === ayah.number && "bg-emerald-900/30 text-emerald-400"
+                                )}
                               >
                                 {isFirstAyahOfSurah && ayah.surah?.number !== 1 && ayah.surah?.number !== 9
                                   ? ayah.text.replace('بِسْمِ اللَّهِ الرَّحْمَٰنِ الرَّحِيمِ', '')
                                   : ayah.text
                                 }
                                 {renderAyahEnd(ayah.numberInSurah)}
+                                <button 
+                                  onClick={(e) => { e.stopPropagation(); playAyahAudio(ayah); }}
+                                  className="absolute -right-8 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 p-1 bg-white border border-gray-200 rounded-full shadow-sm transition-all"
+                                >
+                                  {playingAyah === ayah.number ? <Pause size={12} /> : <Play size={12} />}
+                                </button>
+                                {showTranslation && translations[ayah.numberInSurah] && (
+                                  <div className="translation-text">
+                                    {translations[ayah.numberInSurah]}
+                                  </div>
+                                )}
                               </span>
                             </span>
                           );
@@ -621,6 +811,27 @@ export default function QuranReader() {
         )}
       </div>
 
+      {viewMode === 'surah' && !searchQuery && (
+        <div className="flex flex-wrap items-center justify-center gap-2 max-w-4xl mx-auto">
+          <span className="text-sm text-gray-400 ml-2">روابط سريعة:</span>
+          {[
+            { name: 'الكهف', number: 18 },
+            { name: 'يس', number: 36 },
+            { name: 'الملك', number: 67 },
+            { name: 'الواقعة', number: 56 },
+            { name: 'الرحمن', number: 55 }
+          ].map(link => (
+            <button 
+              key={link.number}
+              onClick={() => fetchSurahContent(link.number)}
+              className="px-4 py-1.5 bg-white border border-gray-200 rounded-full text-sm text-gray-600 hover:border-[#5A5A40] hover:text-[#5A5A40] transition-all"
+            >
+              {link.name}
+            </button>
+          ))}
+        </div>
+      )}
+
       <AnimatePresence mode="wait">
         {initialLoading ? (
           <div className="flex flex-col items-center justify-center py-20 gap-4">
@@ -653,7 +864,13 @@ export default function QuranReader() {
                 </div>
                 <div className="flex-1">
                   <h3 className="text-xl font-bold text-[#5A5A40]">{surah.name}</h3>
-                  <p className="text-sm text-[#8e8e8e]">{surah.englishName}</p>
+                  <div className="flex items-center gap-2">
+                    <p className="text-sm text-[#8e8e8e]">{surah.englishName}</p>
+                    <span className="text-[10px] text-[#8e8e8e] opacity-60">•</span>
+                    <p className="text-[10px] text-[#8e8e8e] uppercase tracking-wider">
+                      {surah.revelationType === 'Meccan' ? 'مكية' : 'مدنية'}
+                    </p>
+                  </div>
                 </div>
                 <div className="text-left">
                   <span className="text-xs bg-[#f5f5f0] text-[#5c5c5c] px-3 py-1 rounded-full">
