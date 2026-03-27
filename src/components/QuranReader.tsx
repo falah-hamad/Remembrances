@@ -97,9 +97,17 @@ export default function QuranReader() {
   const fetchSurahs = async () => {
     setInitialLoading(true);
     try {
-      const res = await fetch('https://api.alquran.cloud/v1/surah');
+      const res = await fetch('/api/proxy/surahs');
       const data = await res.json();
-      setSurahs(data.data);
+      const mappedSurahs = data.map((s: any) => ({
+        number: parseInt(s.number),
+        name: s.name_ar,
+        englishName: s.name_en,
+        englishNameTranslation: '', 
+        numberOfAyahs: parseInt(s.ayat_count),
+        revelationType: s.type
+      }));
+      setSurahs(mappedSurahs);
     } catch (err) {
       console.error('Error fetching surahs:', err);
     } finally {

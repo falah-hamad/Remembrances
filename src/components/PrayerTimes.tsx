@@ -17,6 +17,7 @@ import {
 export default function PrayerTimes() {
   const [times, setTimes] = useState<any>(null);
   const [location, setLocation] = useState<string>('جاري تحديد الموقع...');
+  const [hijriDate, setHijriDate] = useState<string>('');
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
   const [error, setError] = useState<string | null>(null);
@@ -27,10 +28,18 @@ export default function PrayerTimes() {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch(`https://api.aladhan.com/v1/timings?latitude=${lat}&longitude=${lng}&method=4`);
+      const res = await fetch(`/api/proxy/prayer-times?lat=${lat}&lng=${lng}`);
       const data = await res.json();
-      setTimes(data.data.timings);
+      
+      // The new API returns prayer_times
+      const timings = data.prayer_times || data.timings || data.data?.timings || data;
+      setTimes(timings);
       setLocation(label);
+
+      if (data.date?.date_hijri) {
+        const h = data.date.date_hijri;
+        setHijriDate(`${h.day} ${h.month.ar} ${h.year}`);
+      }
     } catch (error) {
       setError("حدث خطأ أثناء جلب مواقيت الصلاة.");
       console.error(error);
@@ -43,17 +52,20 @@ export default function PrayerTimes() {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch(`https://api.aladhan.com/v1/timingsByCity?city=${city}&country=&method=4`);
-      const data = await res.json();
-      if (data.code === 200) {
-        setTimes(data.data.timings);
-        setLocation(city);
+      // First, geocode the city to get lat/lng
+      const geoRes = await fetch(`https://nominatim.openstreetmap.org/search?q=${city}&format=json&limit=1`);
+      const geoData = await geoRes.json();
+      
+      if (geoData && geoData.length > 0) {
+        const { lat, lon } = geoData[0];
+        await fetchTimes(parseFloat(lat), parseFloat(lon), city);
         setShowSearch(false);
       } else {
         setError("لم يتم العثور على المدينة المطلوبة.");
       }
     } catch (error) {
       setError("حدث خطأ أثناء البحث عن المدينة.");
+      console.error(error);
     } finally {
       setLoading(false);
     }
@@ -92,6 +104,36 @@ export default function PrayerTimes() {
     Maghrib: 'المغرب',
     Isha: 'العشاء'
   };
+
+  const formatTime12h = (time24: string) => {
+    if (!time24 || time24 === '--:--') return '--:--';
+    const [hours, minutes] = time24.split(':').map(Number);
+    const period = hours >= 12 ? 'م' : 'ص'; // Arabic AM/PM
+    const h12 = hours % 12 || 12;
+    return `${h12}:${minutes.toString().padStart(2, '0')} ${period}`;
+  };
+
+  const getNextPrayer = () => {
+    if (!times) return { name: 'الظهر', time: '12:15 PM' };
+    
+    const now = new Date();
+    const currentMinutes = now.getHours() * 60 + now.getMinutes();
+    
+    const prayers = Object.entries(prayerNames).map(([key, name]) => {
+      const timeStr = times[key] || '00:00';
+      const [hours, minutes] = timeStr.split(':').map(Number);
+      return { 
+        name, 
+        time: formatTime12h(timeStr), 
+        minutes: (hours || 0) * 60 + (minutes || 0) 
+      };
+    });
+    
+    const next = prayers.find(p => p.minutes > currentMinutes) || prayers[0];
+    return next;
+  };
+
+  const nextPrayer = getNextPrayer();
 
   if (loading && !times) {
     return (
@@ -168,10 +210,10 @@ export default function PrayerTimes() {
         <div className="bg-[#5A5A40] p-10 text-white text-center space-y-4 relative overflow-hidden">
           <div className="relative z-10">
             <span className="text-sm font-bold opacity-80 uppercase tracking-widest">الصلاة القادمة</span>
-            <h3 className="text-5xl font-bold mt-2">الظهر</h3>
+            <h3 className="text-5xl font-bold mt-2">{nextPrayer.name}</h3>
             <div className="flex items-center justify-center gap-2 mt-4">
               <Clock size={20} className="opacity-60" />
-              <span className="text-2xl font-light">12:15 PM</span>
+              <span className="text-2xl font-light">{nextPrayer.time}</span>
             </div>
           </div>
           <div className="absolute -bottom-10 -left-10 w-40 h-40 bg-white/10 rounded-full blur-3xl" />
@@ -188,8 +230,7 @@ export default function PrayerTimes() {
                 <span className="font-bold text-xl text-[#1a1a1a]">{name}</span>
               </div>
               <div className="flex flex-col items-end">
-                <span className="text-2xl font-bold text-[#5A5A40]">{times[key]}</span>
-                <span className="text-[10px] text-[#8e8e8e] font-bold">AM/PM</span>
+                <span className="text-2xl font-bold text-[#5A5A40]">{formatTime12h(times[key])}</span>
               </div>
             </div>
           ))}
@@ -209,7 +250,7 @@ export default function PrayerTimes() {
         <div className="bg-white p-6 rounded-3xl border border-[#e5e5e0] flex items-center justify-between shadow-sm">
           <div className="space-y-1">
             <h4 className="font-bold text-[#5A5A40]">التاريخ الهجري</h4>
-            <p className="text-xs text-[#8e8e8e]">14 رمضان 1447</p>
+            <p className="text-xs text-[#8e8e8e]">{hijriDate || 'جاري التحميل...'}</p>
           </div>
           <Calendar size={20} className="text-[#5A5A40]" />
         </div>
